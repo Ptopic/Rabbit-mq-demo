@@ -78,6 +78,7 @@ npm run workflow:ecommerce
 These scripts:
 - Open terminal windows for each required producer/consumer.
 - Start the demo automatically (producer runs in demo mode).
+- Arrange windows in a grid layout (best-effort based on OS/terminal support).
 
 ## RabbitMQ Management UI
 

@@ -5,6 +5,7 @@ const { launchWorkflow, REPO_ROOT } = require('../standalone/workflowLauncher');
 launchWorkflow({
   name: 'Direct exchange - logging by level',
   cwd: REPO_ROOT,
+  layout: { grid: { columns: 2 } },
   windows: [
     {
       title: 'Consumer - direct logs (info)',

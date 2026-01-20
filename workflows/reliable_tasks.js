@@ -5,6 +5,7 @@ const { launchWorkflow, REPO_ROOT } = require('../standalone/workflowLauncher');
 launchWorkflow({
   name: 'Reliable tasks - retry + DLQ',
   cwd: REPO_ROOT,
+  layout: { grid: { columns: 2 } },
   windows: [
     {
       title: 'Worker - reliable tasks',

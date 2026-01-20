@@ -5,6 +5,7 @@ const { launchWorkflow, REPO_ROOT } = require('../standalone/workflowLauncher');
 launchWorkflow({
   name: 'Topic exchange - routing by pattern',
   cwd: REPO_ROOT,
+  layout: { grid: { columns: 2 } },
   windows: [
     {
       title: 'Consumer - topic (user.#)',

@@ -5,6 +5,7 @@ const { launchWorkflow, REPO_ROOT } = require('../standalone/workflowLauncher');
 launchWorkflow({
   name: 'E-commerce order pipeline',
   cwd: REPO_ROOT,
+  layout: { grid: { columns: 3 } },
   windows: [
     {
       title: 'Service - Payment',

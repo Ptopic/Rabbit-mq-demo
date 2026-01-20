@@ -5,6 +5,7 @@ const { launchWorkflow, REPO_ROOT } = require('../standalone/workflowLauncher');
 launchWorkflow({
   name: 'Work queue - task distribution',
   cwd: REPO_ROOT,
+  layout: { grid: { columns: 2 } },
   windows: [
     {
       title: 'Worker - queue (Worker 1)',
