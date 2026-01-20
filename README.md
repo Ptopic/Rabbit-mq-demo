@@ -55,6 +55,30 @@ npm run producer
 
 Optional: start more consumers (different roles/patterns) depending on the selected use case.
 
+### 4. Auto-launch workflows (opens required terminals)
+
+Each workflow has its own JS entry point and can auto-start the producer + required consumers.
+Example (fanout workflow = 1 producer + 3 consumers):
+
+```bash
+npm run workflow:fanout
+```
+
+Available workflow scripts:
+
+```bash
+npm run workflow:direct
+npm run workflow:fanout
+npm run workflow:topic
+npm run workflow:work-queue
+npm run workflow:reliable
+npm run workflow:ecommerce
+```
+
+These scripts:
+- Open terminal windows for each required producer/consumer.
+- Start the demo automatically (producer runs in demo mode).
+
 ## RabbitMQ Management UI
 
 After starting RabbitMQ, you can access the management interface:
@@ -80,9 +104,18 @@ rabbitmq-demo/
 ├── standalone/
 │   ├── producer.js             # Interactive producer (all scenarios)
 │   ├── consumer.js             # Interactive consumer (all scenarios)
+│   ├── workflowLauncher.js     # Opens terminal windows for auto demos
+│   ├── cliArgs.js              # CLI parsing helpers
 │   ├── rabbitConstants.js      # Exchange/queue names
 │   ├── useCases.js             # Use case definitions
 │   └── helpers.js              # Small utilities
+├── workflows/                  # Auto-launch scripts per workflow
+│   ├── direct_logs.js
+│   ├── fanout_notifications.js
+│   ├── topic_events.js
+│   ├── work_queue.js
+│   ├── reliable_tasks.js
+│   └── ecommerce_pipeline.js
 ```
 
 ## Docker Commands (Manual)
@@ -109,6 +142,12 @@ docker compose down -v
 npm start              # Start the producer (interactive scenarios)
 npm run producer       # Start the producer (interactive scenarios)
 npm run consumer       # Start the consumer (interactive scenarios)
+npm run workflow:direct  # Auto-launch direct logs workflow
+npm run workflow:fanout  # Auto-launch fanout workflow
+npm run workflow:topic   # Auto-launch topic workflow
+npm run workflow:work-queue # Auto-launch work queue workflow
+npm run workflow:reliable # Auto-launch reliable tasks workflow
+npm run workflow:ecommerce # Auto-launch e-commerce workflow
 npm run docker:up      # Start RabbitMQ
 npm run docker:down    # Stop RabbitMQ
 npm run docker:logs    # View RabbitMQ logs
