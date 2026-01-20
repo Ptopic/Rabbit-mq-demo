@@ -1,0 +1,29 @@
+{
+  "name": "rabbitmq-eda-demo",
+  "version": "1.0.0",
+  "description": "Event-Driven Architecture Demo with RabbitMQ - Proof of Concept for Term Paper",
+  "main": "standalone/producer.js",
+  "scripts": {
+    "start": "node standalone/producer.js",
+    "producer": "node standalone/producer.js",
+    "consumer": "node standalone/consumer.js",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f rabbitmq"
+  },
+  "keywords": [
+    "rabbitmq",
+    "event-driven",
+    "microservices",
+    "amqp",
+    "docker"
+  ],
+  "author": "Petar Topic",
+  "license": "MIT",
+  "dependencies": {
+    "rabbitmq-client": "^5.0.0",
+    "inquirer": "^8.2.6",
+    "chalk": "^4.1.2",
+    "ora": "^5.4.1"
+  }
+}
