@@ -5,7 +5,7 @@ const { launchWorkflow, REPO_ROOT } = require('../standalone/workflowLauncher');
 launchWorkflow({
   name: 'Fanout exchange - broadcast notifications',
   cwd: REPO_ROOT,
-  layout: { grid: { columns: 2 } },
+  layout: { tmux: { session: 'rabbitmq-demo' }, grid: { columns: 2 } },
   windows: [
     {
       title: 'Consumer - Email worker',

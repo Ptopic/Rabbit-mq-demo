@@ -726,13 +726,13 @@ async function main() {
       'inventory.failed',
       'payment.failed',
       'payment.refunded',
-      'inventory.released'
     ],
     analytics: ['#']
   };
 
   const paidOrders = new Map(); // orderId -> amount (very simple in-memory state for the demo)
   const notificationState = new Map(); // orderId -> state for user-facing notification ordering
+  const stepDelayMs = 3000;
 
   // Durable queues keep bindings between runs; after code changes this can cause confusing routing.
   // For this interactive demo we prefer a clean slate each time you start a role.
@@ -845,7 +845,7 @@ async function main() {
 
       // Minimal simulation of side effects:
       if (role === 'payment' && rk === 'order.created') {
-        await sleep(900);
+        await sleep(stepDelayMs);
         if (body.forcePaymentFail) {
           await publisher.send(
             { exchange: C.ecommerce.exchange, routingKey: 'payment.failed' },
@@ -871,7 +871,7 @@ async function main() {
       }
 
       if (role === 'payment' && rk === 'inventory.failed') {
-        await sleep(400);
+        await sleep(stepDelayMs);
         const paidAmount = paidOrders.get(body.orderId);
         if (typeof paidAmount === 'number') {
           await publisher.send(
@@ -893,7 +893,7 @@ async function main() {
 
       if (role === 'inventory' && rk === 'order.created') {
         // Simulate slower inventory check (more realistic ordering vs payment).
-        await sleep(3000);
+        await sleep(stepDelayMs);
         if (body.forcePaymentFail) {
           console.log(chalk.gray('Skip inventory reservation (payment-failed scenario).'));
           return ACK;
@@ -911,6 +911,7 @@ async function main() {
           );
           console.log(chalk.gray('Published: inventory.failed'));
 
+          await sleep(stepDelayMs);
           await publisher.send(
             { exchange: C.ecommerce.exchange, routingKey: 'order.failed' },
             {
@@ -932,7 +933,7 @@ async function main() {
       }
 
       if (role === 'inventory' && rk === 'payment.failed') {
-        await sleep(400);
+        await sleep(stepDelayMs);
         await publisher.send(
           { exchange: C.ecommerce.exchange, routingKey: 'inventory.released' },
           {

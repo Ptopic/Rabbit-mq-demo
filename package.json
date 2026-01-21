@@ -13,6 +13,7 @@
     "workflow:work-queue": "node workflows/work_queue.js",
     "workflow:reliable": "node workflows/reliable_tasks.js",
     "workflow:ecommerce": "node workflows/ecommerce_pipeline.js",
+    "worklogs": "node standalone/workflowSelector.js",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f rabbitmq"

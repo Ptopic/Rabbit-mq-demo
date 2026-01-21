@@ -57,6 +57,59 @@ function normalizeGridConfig(grid, totalWindows) {
   return { columns, rows, gap };
 }
 
+function sanitizeSessionName(name) {
+  return String(name || 'rabbitmq-demo')
+    .trim()
+    .replace(/[^A-Za-z0-9_-]/g, '-')
+    .replace(/-+/g, '-');
+}
+
+function tmuxHasSession(name) {
+  const result = spawnSync('tmux', ['has-session', '-t', name], { stdio: 'ignore' });
+  return result.status === 0;
+}
+
+function uniqueTmuxSessionName(base) {
+  const sanitized = sanitizeSessionName(base);
+  if (!tmuxHasSession(sanitized)) return sanitized;
+  let counter = 1;
+  while (tmuxHasSession(`${sanitized}-${counter}`)) counter += 1;
+  return `${sanitized}-${counter}`;
+}
+
+function launchTmuxWorkflow({ name, windows, cwd, layout }) {
+  const workingDir = cwd || REPO_ROOT;
+  const sessionName = uniqueTmuxSessionName(layout && layout.tmux && layout.tmux.session ? layout.tmux.session : name);
+  const buildCommand = (cmd) => buildShellCommand(cmd, workingDir);
+
+  const first = windows[0];
+  const firstCommand = first ? buildCommand(first.command) : 'bash';
+  const created = spawnSync('tmux', ['new-session', '-d', '-s', sessionName, '-c', workingDir, 'bash', '-lc', firstCommand], {
+    stdio: 'ignore'
+  });
+  if (created.status !== 0) {
+    console.error('Failed to create tmux session.');
+    return false;
+  }
+
+  for (let index = 1; index < windows.length; index += 1) {
+    const win = windows[index];
+    const command = buildCommand(win.command);
+    spawnSync('tmux', ['split-window', '-t', `${sessionName}:0`, '-c', workingDir, 'bash', '-lc', command], { stdio: 'ignore' });
+  }
+
+  spawnSync('tmux', ['select-layout', '-t', `${sessionName}:0`, 'tiled'], { stdio: 'ignore' });
+  spawnSync('tmux', ['rename-window', '-t', `${sessionName}:0`, name], { stdio: 'ignore' });
+
+  if (process.env.TMUX) {
+    spawnSync('tmux', ['switch-client', '-t', sessionName], { stdio: 'inherit' });
+  } else {
+    spawnSync('tmux', ['attach-session', '-t', sessionName], { stdio: 'inherit' });
+  }
+
+  return true;
+}
+
 function calculateGridBounds(index, totalWindows, gridConfig, screenBounds) {
   if (!gridConfig) return null;
   const { columns, rows, gap } = gridConfig;
@@ -80,11 +133,12 @@ function openTerminalWindow({ title, command, cwd, bounds }) {
 
   if (platform === 'darwin') {
     const boundsScript = bounds
-      ? `\n  set bounds of front window to {${bounds.x}, ${bounds.y}, ${bounds.x + bounds.width}, ${bounds.y + bounds.height}}`
+      ? `\n  set bounds of newWindow to {${bounds.x}, ${bounds.y}, ${bounds.x + bounds.width}, ${bounds.y + bounds.height}}`
       : '';
     const script = `tell application "Terminal"
   activate
-  do script "${escapeAppleScript(buildShellCommand(command, workingDir))}"${boundsScript}
+  set newWindow to (make new window with default settings)
+  do script "${escapeAppleScript(buildShellCommand(command, workingDir))}" in newWindow${boundsScript}
 end tell`;
 
     const child = spawn('osascript', ['-e', script], { stdio: 'ignore', detached: true });
@@ -157,6 +211,10 @@ end tell`;
 
 function launchWorkflow({ name, windows, cwd, layout }) {
   console.log(`Launching workflow: ${name}`);
+  if (layout && layout.tmux && process.platform !== 'win32' && commandExists('tmux')) {
+    const launched = launchTmuxWorkflow({ name, windows, cwd, layout });
+    if (launched) return;
+  }
   const gridConfig = normalizeGridConfig(layout && layout.grid, windows.length);
   const screenBounds = gridConfig ? getScreenBounds() : null;
   windows.forEach((win, index) => {
