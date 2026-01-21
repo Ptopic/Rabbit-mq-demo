@@ -7,6 +7,13 @@
     "start": "node standalone/producer.js",
     "producer": "node standalone/producer.js",
     "consumer": "node standalone/consumer.js",
+    "workflow:direct": "node workflows/direct_logs.js",
+    "workflow:fanout": "node workflows/fanout_notifications.js",
+    "workflow:topic": "node workflows/topic_events.js",
+    "workflow:work-queue": "node workflows/work_queue.js",
+    "workflow:reliable": "node workflows/reliable_tasks.js",
+    "workflow:ecommerce": "node workflows/ecommerce_pipeline.js",
+    "worklogs": "node standalone/workflowSelector.js",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f rabbitmq"

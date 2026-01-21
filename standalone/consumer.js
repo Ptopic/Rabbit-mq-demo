@@ -7,6 +7,7 @@ const { createConnection, waitForConnection } = require('../utils/connection');
 const { USE_CASES } = require('./useCases');
 const C = require('./rabbitConstants');
 const { sleep, clearScreen, printUseCaseIntro } = require('./helpers');
+const { parseArgs, getNumber } = require('./cliArgs');
 
 clearScreen();
 console.log(chalk.cyan.bold('\nRabbitMQ Consumer\n'));
@@ -126,16 +127,25 @@ async function enterRunningState() {
 }
 
 async function main() {
-  const { useCaseId } = await inquirer.prompt([
-    {
-      type: 'list',
-      name: 'useCaseId',
-      message: 'Select a consumer use case:',
-      choices: USE_CASES.map((u) => ({ name: u.name, value: u.id }))
-    }
-  ]);
+  const options = parseArgs();
+  const useCaseId = options.useCase
+    ? options.useCase
+    : (
+      await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'useCaseId',
+          message: 'Select a consumer use case:',
+          choices: USE_CASES.map((u) => ({ name: u.name, value: u.id }))
+        }
+      ])
+    ).useCaseId;
 
   const useCase = USE_CASES.find((u) => u.id === useCaseId);
+  if (!useCase) {
+    console.log(chalk.red('Unknown use case. Please check the --use-case value.'));
+    process.exit(1);
+  }
   printUseCaseIntro(chalk, useCase);
 
   // Default: temporary queues where applicable to avoid persistent bindings between runs.
@@ -143,9 +153,13 @@ async function main() {
   await waitForConnection(connection);
 
   if (useCaseId === 'direct_logs') {
-    const { routingKey } = await inquirer.prompt([
-      { type: 'list', name: 'routingKey', message: 'Level to listen to:', choices: ['info', 'warning', 'error'] }
-    ]);
+    const routingKey = options.useCase
+      ? options.routingKey || 'info'
+      : (
+        await inquirer.prompt([
+          { type: 'list', name: 'routingKey', message: 'Level to listen to:', choices: ['info', 'warning', 'error'] }
+        ])
+      ).routingKey;
 
     console.log(chalk.cyan('\nStarting direct logs consumer...'));
     console.log(chalk.gray(`Exchange: ${C.directLogs.exchange} (${C.directLogs.type})`));
@@ -181,32 +195,37 @@ async function main() {
   }
 
   if (useCaseId === 'fanout_notifications') {
-    const { servicePreset, customServiceName } = await inquirer.prompt([
-      {
-        type: 'list',
-        name: 'servicePreset',
-        message: 'Service:',
-        choices: [
-          { name: 'Email worker', value: 'Email worker' },
-          { name: 'SMS worker', value: 'SMS worker' },
-          { name: 'Push worker', value: 'Push worker' },
-          { name: 'Custom', value: 'custom' }
-        ]
-    },
-    {
-      type: 'input',
-        name: 'customServiceName',
-        message: 'Custom service name:',
-        when: (a) => a.servicePreset === 'custom',
-        default: 'Email worker'
-      }
-    ]);
+    const serviceName = options.useCase
+      ? options.service || 'Email worker'
+      : (() => {
+        const answer = inquirer.prompt([
+          {
+            type: 'list',
+            name: 'servicePreset',
+            message: 'Service:',
+            choices: [
+              { name: 'Email worker', value: 'Email worker' },
+              { name: 'SMS worker', value: 'SMS worker' },
+              { name: 'Push worker', value: 'Push worker' },
+              { name: 'Custom', value: 'custom' }
+            ]
+          },
+          {
+            type: 'input',
+            name: 'customServiceName',
+            message: 'Custom service name:',
+            when: (a) => a.servicePreset === 'custom',
+            default: 'Email worker'
+          }
+        ]);
+        return answer.then((value) => (value.servicePreset === 'custom' ? value.customServiceName : value.servicePreset));
+      })();
 
-    const serviceName = servicePreset === 'custom' ? customServiceName : servicePreset;
+    const resolvedServiceName = await serviceName;
 
     console.log(chalk.cyan('\nStarting fanout notification consumer...'));
     console.log(chalk.gray(`Exchange: ${C.fanoutNotifications.exchange} (${C.fanoutNotifications.type})`));
-    console.log(chalk.gray(`Service: ${serviceName}`));
+    console.log(chalk.gray(`Service: ${resolvedServiceName}`));
     console.log(chalk.gray('Queue: (server-generated)\n'));
 
     consumer = connection.createConsumer(
@@ -217,12 +236,12 @@ async function main() {
         exchanges: [{ exchange: C.fanoutNotifications.exchange, type: C.fanoutNotifications.type, durable: true }]
       },
       async (msg) => {
-        console.log(chalk.green(`\n[${new Date().toLocaleTimeString()}] ${serviceName} received`));
+        console.log(chalk.green(`\n[${new Date().toLocaleTimeString()}] ${resolvedServiceName} received`));
         logConsumerParamsAndContent({
           params: {
             'Consumer type': 'Fanout exchange',
             Exchange: C.fanoutNotifications.exchange,
-            Service: serviceName
+            Service: resolvedServiceName
           },
           body: msg.body
         });
@@ -236,35 +255,40 @@ async function main() {
   }
 
   if (useCaseId === 'topic_events') {
-    const { patternPreset, customPattern } = await inquirer.prompt([
-      {
-        type: 'list',
-        name: 'patternPreset',
-        message: 'Routing pattern:',
-        choices: [
-          { name: 'user.# (all user events)', value: 'user.#' },
-          { name: '*.*.updated (all updates)', value: '*.*.updated' },
-          { name: 'order.*.critical (critical order events)', value: 'order.*.critical' },
-          { name: '# (everything)', value: '#' },
-          { name: 'Custom', value: 'custom' }
-        ],
-        default: 'user.#'
-      },
-    {
-      type: 'input',
-        name: 'customPattern',
-        message: 'Custom pattern:',
-        when: (a) => a.patternPreset === 'custom',
-        default: 'custom.#'
-      }
-    ]);
+    const pattern = options.useCase
+      ? options.pattern || 'user.#'
+      : (() => {
+        const answer = inquirer.prompt([
+          {
+            type: 'list',
+            name: 'patternPreset',
+            message: 'Routing pattern:',
+            choices: [
+              { name: 'user.# (all user events)', value: 'user.#' },
+              { name: '*.*.updated (all updates)', value: '*.*.updated' },
+              { name: 'order.*.critical (critical order events)', value: 'order.*.critical' },
+              { name: '# (everything)', value: '#' },
+              { name: 'Custom', value: 'custom' }
+            ],
+            default: 'user.#'
+          },
+          {
+            type: 'input',
+            name: 'customPattern',
+            message: 'Custom pattern:',
+            when: (a) => a.patternPreset === 'custom',
+            default: 'custom.#'
+          }
+        ]);
+        return answer.then((value) => (value.patternPreset === 'custom' ? value.customPattern : value.patternPreset));
+      })();
 
-    const pattern = patternPreset === 'custom' ? customPattern : patternPreset;
-    const name = consumerNameFromPattern(pattern);
+    const resolvedPattern = await pattern;
+    const name = consumerNameFromPattern(resolvedPattern);
 
     console.log(chalk.cyan('\nStarting topic events consumer...'));
     console.log(chalk.gray(`Exchange: ${C.topicEvents.exchange} (${C.topicEvents.type})`));
-    console.log(chalk.gray(`Pattern: ${pattern}`));
+    console.log(chalk.gray(`Pattern: ${resolvedPattern}`));
     console.log(chalk.gray(`Name: ${name}`));
     console.log(chalk.gray('Queue: (server-generated)\n'));
 
@@ -272,7 +296,7 @@ async function main() {
       {
     queue: '',
     queueOptions: { exclusive: true, autoDelete: true },
-        queueBindings: [{ exchange: C.topicEvents.exchange, routingKey: pattern }],
+        queueBindings: [{ exchange: C.topicEvents.exchange, routingKey: resolvedPattern }],
         exchanges: [{ exchange: C.topicEvents.exchange, type: C.topicEvents.type, durable: true }]
       },
       async (msg) => {
@@ -281,7 +305,7 @@ async function main() {
           params: {
             'Consumer type': 'Topic exchange',
             Exchange: C.topicEvents.exchange,
-            Pattern: pattern,
+            Pattern: resolvedPattern,
             Name: name
           },
           routingKey: msg.routingKey,
@@ -297,76 +321,79 @@ async function main() {
   }
 
   if (useCaseId === 'work_queue') {
-    const {
-      workerPreset,
-      customWorkerName,
-      prefetchPreset,
-      customPrefetchCount,
-      concurrencyPreset,
-      customConcurrency
-    } = await inquirer.prompt([
-      {
-        type: 'list',
-        name: 'workerPreset',
-        message: 'Worker:',
-        choices: [
-          { name: 'Worker 1', value: 'Worker 1' },
-          { name: 'Worker 2', value: 'Worker 2' },
-          { name: 'Worker 3', value: 'Worker 3' },
-          { name: 'Custom', value: 'custom' }
-        ]
-      },
-    {
-      type: 'input',
-        name: 'customWorkerName',
-        message: 'Custom worker name:',
-        when: (a) => a.workerPreset === 'custom',
-        default: 'Worker 1'
-      },
-      {
-        type: 'list',
-        name: 'prefetchPreset',
-        message: 'prefetchCount (QoS):',
-        choices: [
-          { name: '1 (fair dispatch)', value: 1 },
-          { name: '5', value: 5 },
-          { name: '10', value: 10 },
-          { name: 'Custom', value: 'custom' }
-        ],
-        default: C.workQueue.defaultPrefetch
-      },
-      {
-        type: 'number',
-        name: 'customPrefetchCount',
-        message: 'Custom prefetchCount:',
-        when: (a) => a.prefetchPreset === 'custom',
-        default: C.workQueue.defaultPrefetch
-      },
-      {
-        type: 'list',
-        name: 'concurrencyPreset',
-        message: 'Concurrency (parallel handlers):',
-        choices: [
-          { name: '1 (default)', value: 1 },
-          { name: '2', value: 2 },
-          { name: '5', value: 5 },
-          { name: '10', value: 10 },
-          { name: 'Custom', value: 'custom' }
-        ],
-        default: 1
-      },
-      {
-        type: 'number',
-        name: 'customConcurrency',
-        message: 'Custom concurrency:',
-        when: (a) => a.concurrencyPreset === 'custom',
-        default: 1
-      }
-    ]);
+    let workerName;
+    let prefetchCount;
+    let concurrency;
 
-    const workerName = workerPreset === 'custom' ? customWorkerName : workerPreset;
-    const prefetchCount = prefetchPreset === 'custom' ? customPrefetchCount : prefetchPreset;
-    const concurrency = concurrencyPreset === 'custom' ? customConcurrency : concurrencyPreset;
+    if (options.useCase) {
+      workerName = options.worker || 'Worker 1';
+      prefetchCount = getNumber(options.prefetch, C.workQueue.defaultPrefetch);
+      concurrency = getNumber(options.concurrency, 1);
+    } else {
+      const answers = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'workerPreset',
+          message: 'Worker:',
+          choices: [
+            { name: 'Worker 1', value: 'Worker 1' },
+            { name: 'Worker 2', value: 'Worker 2' },
+            { name: 'Worker 3', value: 'Worker 3' },
+            { name: 'Custom', value: 'custom' }
+          ]
+        },
+        {
+          type: 'input',
+          name: 'customWorkerName',
+          message: 'Custom worker name:',
+          when: (a) => a.workerPreset === 'custom',
+          default: 'Worker 1'
+        },
+        {
+          type: 'list',
+          name: 'prefetchPreset',
+          message: 'prefetchCount (QoS):',
+          choices: [
+            { name: '1 (fair dispatch)', value: 1 },
+            { name: '5', value: 5 },
+            { name: '10', value: 10 },
+            { name: 'Custom', value: 'custom' }
+          ],
+          default: C.workQueue.defaultPrefetch
+        },
+        {
+          type: 'number',
+          name: 'customPrefetchCount',
+          message: 'Custom prefetchCount:',
+          when: (a) => a.prefetchPreset === 'custom',
+          default: C.workQueue.defaultPrefetch
+        },
+        {
+          type: 'list',
+          name: 'concurrencyPreset',
+          message: 'Concurrency (parallel handlers):',
+          choices: [
+            { name: '1 (default)', value: 1 },
+            { name: '2', value: 2 },
+            { name: '5', value: 5 },
+            { name: '10', value: 10 },
+            { name: 'Custom', value: 'custom' }
+          ],
+          default: 1
+        },
+        {
+          type: 'number',
+          name: 'customConcurrency',
+          message: 'Custom concurrency:',
+          when: (a) => a.concurrencyPreset === 'custom',
+          default: 1
+        }
+      ]);
+
+      workerName = answers.workerPreset === 'custom' ? answers.customWorkerName : answers.workerPreset;
+      prefetchCount = answers.prefetchPreset === 'custom' ? answers.customPrefetchCount : answers.prefetchPreset;
+      concurrency = answers.concurrencyPreset === 'custom' ? answers.customConcurrency : answers.concurrencyPreset;
+    }
 
     console.log(chalk.cyan('\nStarting work queue worker...'));
     console.log(chalk.gray(`Queue: ${C.workQueue.queue}`));
@@ -406,17 +433,21 @@ async function main() {
   }
 
   if (useCaseId === 'reliable_tasks_retry_dlq') {
-    const { role } = await inquirer.prompt([
-      {
-        type: 'list',
-        name: 'role',
-        message: 'Role:',
-        choices: [
-          { name: 'Main worker', value: 'worker' },
-          { name: 'DLQ inspector', value: 'dlq' }
-        ]
-      }
-    ]);
+    const role = options.useCase
+      ? options.role || 'worker'
+      : (
+        await inquirer.prompt([
+          {
+            type: 'list',
+            name: 'role',
+            message: 'Role:',
+            choices: [
+              { name: 'Main worker', value: 'worker' },
+              { name: 'DLQ inspector', value: 'dlq' }
+            ]
+          }
+        ])
+      ).role;
 
     if (role === 'dlq') {
       console.log(chalk.cyan('\nStarting DLQ inspector...'));
@@ -450,97 +481,100 @@ async function main() {
       return;
     }
 
-    const {
-      workerPreset,
-      customWorkerName,
-      failRatePreset,
-      customFailRatePct,
-      maxRetriesPreset,
-      customMaxRetries,
-      retryDelayPreset,
-      customRetryDelayMs
-    } = await inquirer.prompt([
-      {
-        type: 'list',
-        name: 'workerPreset',
-        message: 'Worker:',
-        choices: [
-          { name: 'Reliable Worker 1', value: 'Reliable Worker 1' },
-          { name: 'Reliable Worker 2', value: 'Reliable Worker 2' },
-          { name: 'Custom', value: 'custom' }
-        ],
-        default: 'Reliable Worker 1'
-    },
-    {
-      type: 'input',
-        name: 'customWorkerName',
-        message: 'Custom worker name:',
-        when: (a) => a.workerPreset === 'custom',
-        default: 'Reliable Worker 1'
-      },
-      {
-        type: 'list',
-        name: 'failRatePreset',
-        message: 'Simulated failure rate:',
-        choices: [
-          { name: '0% (never fail)', value: 0 },
-          { name: '30% (default)', value: 30 },
-          { name: '60% (often fail)', value: 60 },
-          { name: 'Custom', value: 'custom' }
-        ],
-        default: 30
-      },
-      {
-        type: 'number',
-        name: 'customFailRatePct',
-        message: 'Custom failure rate (0-100):',
-        when: (a) => a.failRatePreset === 'custom',
-        default: 30
-      },
-      {
-        type: 'list',
-        name: 'maxRetriesPreset',
-        message: 'Max retries before DLQ:',
-        choices: [
-          { name: '1', value: 1 },
-          { name: '3 (default)', value: 3 },
-          { name: '5', value: 5 },
-          { name: 'Custom', value: 'custom' }
-        ],
-        default: 3
-      },
-      {
-        type: 'number',
-        name: 'customMaxRetries',
-        message: 'Custom max retries:',
-        when: (a) => a.maxRetriesPreset === 'custom',
-        default: 3
-      },
-      {
-        type: 'list',
-        name: 'retryDelayPreset',
-        message: 'Retry delay:',
-        choices: [
-          { name: '3000 ms', value: 3000 },
-          { name: '5000 ms (default)', value: 5000 },
-          { name: '10000 ms', value: 10000 },
-          { name: 'Custom', value: 'custom' }
-        ],
-        default: 5000
-      },
-      {
-        type: 'number',
-        name: 'customRetryDelayMs',
-        message: 'Custom retry delay (ms):',
-        when: (a) => a.retryDelayPreset === 'custom',
-        default: 5000
-      }
-    ]);
+    let workerName;
+    let failRatePct;
+    let maxRetries;
+    let retryDelayMs;
 
-    const workerName = workerPreset === 'custom' ? customWorkerName : workerPreset;
-    const failRatePct = failRatePreset === 'custom' ? customFailRatePct : failRatePreset;
-    const maxRetries = maxRetriesPreset === 'custom' ? customMaxRetries : maxRetriesPreset;
-    const retryDelayMs = retryDelayPreset === 'custom' ? customRetryDelayMs : retryDelayPreset;
+    if (options.useCase) {
+      workerName = options.worker || 'Reliable Worker 1';
+      failRatePct = getNumber(options.failRate, 30);
+      maxRetries = getNumber(options.maxRetries, 3);
+      retryDelayMs = getNumber(options.retryDelayMs, 5000);
+    } else {
+      const answers = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'workerPreset',
+          message: 'Worker:',
+          choices: [
+            { name: 'Reliable Worker 1', value: 'Reliable Worker 1' },
+            { name: 'Reliable Worker 2', value: 'Reliable Worker 2' },
+            { name: 'Custom', value: 'custom' }
+          ],
+          default: 'Reliable Worker 1'
+        },
+        {
+          type: 'input',
+          name: 'customWorkerName',
+          message: 'Custom worker name:',
+          when: (a) => a.workerPreset === 'custom',
+          default: 'Reliable Worker 1'
+        },
+        {
+          type: 'list',
+          name: 'failRatePreset',
+          message: 'Simulated failure rate:',
+          choices: [
+            { name: '0% (never fail)', value: 0 },
+            { name: '30% (default)', value: 30 },
+            { name: '60% (often fail)', value: 60 },
+            { name: 'Custom', value: 'custom' }
+          ],
+          default: 30
+        },
+        {
+          type: 'number',
+          name: 'customFailRatePct',
+          message: 'Custom failure rate (0-100):',
+          when: (a) => a.failRatePreset === 'custom',
+          default: 30
+        },
+        {
+          type: 'list',
+          name: 'maxRetriesPreset',
+          message: 'Max retries before DLQ:',
+          choices: [
+            { name: '1', value: 1 },
+            { name: '3 (default)', value: 3 },
+            { name: '5', value: 5 },
+            { name: 'Custom', value: 'custom' }
+          ],
+          default: 3
+        },
+        {
+          type: 'number',
+          name: 'customMaxRetries',
+          message: 'Custom max retries:',
+          when: (a) => a.maxRetriesPreset === 'custom',
+          default: 3
+        },
+        {
+          type: 'list',
+          name: 'retryDelayPreset',
+          message: 'Retry delay:',
+          choices: [
+            { name: '3000 ms', value: 3000 },
+            { name: '5000 ms (default)', value: 5000 },
+            { name: '10000 ms', value: 10000 },
+            { name: 'Custom', value: 'custom' }
+          ],
+          default: 5000
+        },
+        {
+          type: 'number',
+          name: 'customRetryDelayMs',
+          message: 'Custom retry delay (ms):',
+          when: (a) => a.retryDelayPreset === 'custom',
+          default: 5000
+        }
+      ]);
+
+      workerName = answers.workerPreset === 'custom' ? answers.customWorkerName : answers.workerPreset;
+      failRatePct = answers.failRatePreset === 'custom' ? answers.customFailRatePct : answers.failRatePreset;
+      maxRetries = answers.maxRetriesPreset === 'custom' ? answers.customMaxRetries : answers.maxRetriesPreset;
+      retryDelayMs = answers.retryDelayPreset === 'custom' ? answers.customRetryDelayMs : answers.retryDelayPreset;
+    }
 
     // Best practice (section 5): separate connections for consume and publish.
     publishConnection = createConnection({ name: `publisher:${workerName}` });
@@ -646,19 +680,23 @@ async function main() {
   }
 
   // ecommerce_pipeline
-  const { role } = await inquirer.prompt([
-    {
-      type: 'list',
-      name: 'role',
-      message: 'Service role:',
-      choices: [
-        { name: 'Payment service', value: 'payment' },
-        { name: 'Inventory service', value: 'inventory' },
-        { name: 'Notification service', value: 'notifications' },
-        { name: 'Analytics service', value: 'analytics' }
-      ]
-    }
-  ]);
+  const role = options.useCase
+    ? options.serviceRole || 'payment'
+    : (
+      await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'role',
+          message: 'Service role:',
+          choices: [
+            { name: 'Payment service', value: 'payment' },
+            { name: 'Inventory service', value: 'inventory' },
+            { name: 'Notification service', value: 'notifications' },
+            { name: 'Analytics service', value: 'analytics' }
+          ]
+        }
+      ])
+    ).role;
 
   const queueName = C.ecommerce.queues[role];
 
@@ -688,13 +726,13 @@ async function main() {
       'inventory.failed',
       'payment.failed',
       'payment.refunded',
-      'inventory.released'
     ],
     analytics: ['#']
   };
 
   const paidOrders = new Map(); // orderId -> amount (very simple in-memory state for the demo)
   const notificationState = new Map(); // orderId -> state for user-facing notification ordering
+  const stepDelayMs = 3000;
 
   // Durable queues keep bindings between runs; after code changes this can cause confusing routing.
   // For this interactive demo we prefer a clean slate each time you start a role.
@@ -807,7 +845,7 @@ async function main() {
 
       // Minimal simulation of side effects:
       if (role === 'payment' && rk === 'order.created') {
-        await sleep(900);
+        await sleep(stepDelayMs);
         if (body.forcePaymentFail) {
           await publisher.send(
             { exchange: C.ecommerce.exchange, routingKey: 'payment.failed' },
@@ -833,7 +871,7 @@ async function main() {
       }
 
       if (role === 'payment' && rk === 'inventory.failed') {
-        await sleep(400);
+        await sleep(stepDelayMs);
         const paidAmount = paidOrders.get(body.orderId);
         if (typeof paidAmount === 'number') {
           await publisher.send(
@@ -855,7 +893,7 @@ async function main() {
 
       if (role === 'inventory' && rk === 'order.created') {
         // Simulate slower inventory check (more realistic ordering vs payment).
-        await sleep(3000);
+        await sleep(stepDelayMs);
         if (body.forcePaymentFail) {
           console.log(chalk.gray('Skip inventory reservation (payment-failed scenario).'));
           return ACK;
@@ -873,6 +911,7 @@ async function main() {
           );
           console.log(chalk.gray('Published: inventory.failed'));
 
+          await sleep(stepDelayMs);
           await publisher.send(
             { exchange: C.ecommerce.exchange, routingKey: 'order.failed' },
             {
@@ -894,7 +933,7 @@ async function main() {
       }
 
       if (role === 'inventory' && rk === 'payment.failed') {
-        await sleep(400);
+        await sleep(stepDelayMs);
         await publisher.send(
           { exchange: C.ecommerce.exchange, routingKey: 'inventory.released' },
           {

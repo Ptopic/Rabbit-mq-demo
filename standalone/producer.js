@@ -6,6 +6,7 @@ const { createConnection, waitForConnection } = require('../utils/connection');
 const { USE_CASES } = require('./useCases');
 const C = require('./rabbitConstants');
 const { sleep, clearScreen, printUseCaseIntro } = require('./helpers');
+const { parseArgs, getNumber } = require('./cliArgs');
 
 clearScreen();
 console.log(chalk.cyan.bold('\nRabbitMQ Producer\n'));
@@ -22,6 +23,10 @@ async function selectUseCase() {
       choices: USE_CASES.map((u) => ({ name: u.name, value: u.id }))
     }
   ]);
+  return USE_CASES.find((u) => u.id === useCaseId);
+}
+
+function resolveUseCaseById(useCaseId) {
   return USE_CASES.find((u) => u.id === useCaseId);
 }
 
@@ -473,17 +478,97 @@ async function publishForUseCase(useCaseId, input) {
   }
 }
 
+async function runDemoLoop(useCaseId, options) {
+  const intervalMs = getNumber(options.intervalMs, 2500);
+  const demoCount = getNumber(options.demoCount, 0);
+  const maxIterations = demoCount > 0 ? demoCount : null;
+  let counter = 0;
+  console.log(chalk.magenta(`\nDemo mode: sending messages every ${intervalMs}ms. Press Ctrl+C to stop.\n`));
+
+  while (maxIterations === null || counter < maxIterations) {
+    counter += 1;
+
+    if (useCaseId === 'direct_logs') {
+      const levels = ['info', 'warning', 'error'];
+      const routingKey = levels[counter % levels.length];
+      await publishForUseCase(useCaseId, {
+        routingKey,
+        message: `Auto log ${counter} (${routingKey})`
+      });
+    } else if (useCaseId === 'fanout_notifications') {
+      await publishForUseCase(useCaseId, {
+        user: `demo_user_${counter}@example.com`,
+        message: `Your order update #${counter}`
+      });
+    } else if (useCaseId === 'topic_events') {
+      const routingKeys = ['user.created', 'order.payment.critical', 'product.inventory.updated'];
+      const routingKey = routingKeys[counter % routingKeys.length];
+      await publishForUseCase(useCaseId, {
+        routingKey,
+        payload: JSON.stringify({ id: `evt_${counter}`, tag: routingKey })
+      });
+    } else if (useCaseId === 'work_queue') {
+      const batchCount = getNumber(options.batchCount, 5);
+      const minDurationMs = getNumber(options.minDurationMs, 400);
+      const maxDurationMs = getNumber(options.maxDurationMs, 1800);
+      await publishForUseCase(useCaseId, {
+        mode: 'batch',
+        batchPrefix: 'Auto Task',
+        batchCount,
+        minDurationMs,
+        maxDurationMs
+      });
+    } else if (useCaseId === 'reliable_tasks_retry_dlq') {
+      const durationMs = getNumber(options.durationMs, 1000);
+      await publishForUseCase(useCaseId, {
+        taskName: `Charge payment #${counter}`,
+        durationMs
+      });
+    } else if (useCaseId === 'ecommerce_pipeline') {
+      const scenarioList = options.demoScenarios
+        ? String(options.demoScenarios)
+          .split(',')
+          .map((entry) => entry.trim())
+          .filter(Boolean)
+        : ['success', 'out_of_stock', 'payment_failed'];
+      const scenario = scenarioList[(counter - 1) % scenarioList.length] || 'success';
+      await publishForUseCase(useCaseId, {
+        routingKey: 'order.created',
+        orderId: `order_${Date.now()}_${counter}`,
+        userId: `user_${counter}`,
+        amount: 49.99,
+        scenario
+      });
+    }
+
+    if (maxIterations === null || counter < maxIterations) {
+      await sleep(intervalMs);
+    }
+  }
+}
+
 async function main() {
+  const options = parseArgs();
+
   connection = createConnection({ name: 'producer' });
   await waitForConnection(connection);
 
-  let useCase = await selectUseCase();
+  let useCase = options.useCase ? resolveUseCaseById(options.useCase) : await selectUseCase();
+  if (!useCase) {
+    console.log(chalk.red('Unknown use case. Please check the --use-case value.'));
+    process.exit(1);
+  }
   clearScreen();
   console.log(chalk.cyan.bold('\nRabbitMQ Producer\n'));
   printUseCaseIntro(chalk, useCase);
   await ensureInfrastructure(useCase.id);
   await createPublisherForUseCase(useCase.id);
   await sleep(200);
+
+  if (options.demo) {
+    await runDemoLoop(useCase.id, options);
+    return;
+  }
 
   while (true) {
     const input = await promptMessageForUseCase(useCase.id);
